@@ -5,7 +5,7 @@ resource "yandex_compute_instance_group" "web-instance-group" {
   instance_template {
 
     platform_id = "standard-v3"
-    name        = "web${count.index + 1}"
+    name        = "web"
     resources {
       memory = 2
       cores  = 2
@@ -14,7 +14,7 @@ resource "yandex_compute_instance_group" "web-instance-group" {
     boot_disk {
       mode = "READ_WRITE"
       initialize_params {
-        image_id = data.yandex_compute_image.main-image.id
+        image_id = data.yandex_compute_image.main_image.id
         type     = "network-hdd"
         size     = 20
       }
@@ -26,7 +26,7 @@ resource "yandex_compute_instance_group" "web-instance-group" {
         yandex_vpc_subnet.subnet-a.id,
         yandex_vpc_subnet.subnet-b.id
       ]
-      security_group_ids = [yandex_vpc_security_group.sg.id]
+      security_group_ids = [yandex_vpc_security_group.web-sg.id]
       nat                = true
     }
 
@@ -37,6 +37,7 @@ resource "yandex_compute_instance_group" "web-instance-group" {
       })
 
     }
+
   }
 
   scale_policy {

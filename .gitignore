@@ -2,8 +2,6 @@
 .terraform/
 *.tfstate
 *.tfstate.*
-*.tfvars
-*.tfvars.json
 *.tfplan
 *.tfbackend
 crash.log

@@ -2,12 +2,13 @@ resource "yandex_compute_disk" "elastic-disk" {
   name     = "elastic-disk"
   type     = "network-hdd"
   zone     = "ru-central1-a"
-  size     = "20"
-  image_id = data.yandex_compute_image.main-image.id
+  size     = 20
+  image_id = data.yandex_compute_image.main_image.id
 }
 
 resource "yandex_compute_instance" "elastic" {
   name = "elastic"
+  zone = "ru-central1-a"
 
   resources {
     cores  = 2
@@ -19,7 +20,7 @@ resource "yandex_compute_instance" "elastic" {
   }
 
   network_interface {
-    subnet_id = yandex_vpc_subnet.subnet_a.id
+    subnet_id = yandex_vpc_subnet.subnet-a.id
     nat       = true
   }
 
@@ -29,4 +30,6 @@ resource "yandex_compute_instance" "elastic" {
       SSH_KEY = var.ssh_key
     })
   }
+
+  security_group_ids = [yandex_vpc_security_group.web-sg.id]
 }

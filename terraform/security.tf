@@ -1,5 +1,5 @@
 resource "yandex_vpc_security_group" "web-sg" {
-  name       = "sg"
+  name       = "web-sg"
   network_id = yandex_vpc_network.main-network.id
   egress {
     protocol       = "ANY"
@@ -13,10 +13,16 @@ resource "yandex_vpc_security_group" "web-sg" {
     port           = 80
   }
   ingress {
+    protocol       = "TCP"
+    description    = "ext-https"
+    v4_cidr_blocks = ["0.0.0.0/0"]
+    port           = 443
+  }
+  ingress {
     protocol          = "TCP"
     port              = 22
     description       = "SSH from bastion"
-    security_group_id = yandex_vpc_security_group.bastion.id
+    security_group_id = yandex_vpc_security_group.bastion-sg.id
   }
   ingress {
     protocol          = "TCP"
