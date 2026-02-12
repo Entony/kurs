@@ -5,7 +5,6 @@ resource "yandex_compute_instance_group" "web-instance-group" {
   instance_template {
 
     platform_id = "standard-v3"
-    name        = "web"
     resources {
       memory = 2
       cores  = 2
@@ -21,13 +20,14 @@ resource "yandex_compute_instance_group" "web-instance-group" {
     }
 
     network_interface {
-      network_id = yandex_vpc_network.main-network.id
+      network_id         = yandex_vpc_network.main-network.id
+      security_group_ids = [yandex_vpc_security_group.web-sg.id]
       subnet_ids = [
         yandex_vpc_subnet.subnet-a.id,
         yandex_vpc_subnet.subnet-b.id
       ]
-      security_group_ids = [yandex_vpc_security_group.web-sg.id]
-      nat                = true
+
+      nat = true
     }
 
     metadata = {

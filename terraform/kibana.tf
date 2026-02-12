@@ -20,8 +20,9 @@ resource "yandex_compute_instance" "kibana" {
   }
 
   network_interface {
-    subnet_id = yandex_vpc_subnet.subnet-public.id
-    nat       = true
+    subnet_id          = yandex_vpc_subnet.subnet-public.id
+    security_group_ids = [yandex_vpc_security_group.web-sg.id]
+    nat                = true
   }
 
   metadata = {
@@ -31,5 +32,5 @@ resource "yandex_compute_instance" "kibana" {
     })
   }
 
-  security_group_ids = [yandex_vpc_security_group.web-sg.id]
+
 }

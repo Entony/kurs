@@ -20,8 +20,9 @@ resource "yandex_compute_instance" "bastion" {
   }
 
   network_interface {
-    subnet_id = yandex_vpc_subnet.subnet-public.id
-    nat       = true
+    subnet_id          = yandex_vpc_subnet.subnet-public.id
+    security_group_ids = [yandex_vpc_security_group.bastion-sg.id]
+    nat                = true
   }
 
   metadata = {
@@ -31,6 +32,6 @@ resource "yandex_compute_instance" "bastion" {
     })
   }
 
-  security_group_ids = [yandex_vpc_security_group.bastion-sg.id]
+
 
 }

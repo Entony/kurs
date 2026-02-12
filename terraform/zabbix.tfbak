@@ -1,13 +1,13 @@
-resource "yandex_compute_disk" "elastic-disk" {
-  name     = "elastic-disk"
+resource "yandex_compute_disk" "zabbix-disk" {
+  name     = "zabbix-disk"
   type     = "network-hdd"
   zone     = "ru-central1-a"
   size     = 20
   image_id = data.yandex_compute_image.main_image.id
 }
 
-resource "yandex_compute_instance" "elastic" {
-  name = "elastic"
+resource "yandex_compute_instance" "zabbix" {
+  name = "zabbix"
   zone = "ru-central1-a"
 
   resources {
@@ -16,11 +16,11 @@ resource "yandex_compute_instance" "elastic" {
   }
 
   boot_disk {
-    disk_id = yandex_compute_disk.elastic-disk.id
+    disk_id = yandex_compute_disk.zabbix-disk.id
   }
 
   network_interface {
-    subnet_id          = yandex_vpc_subnet.subnet-a.id
+    subnet_id          = yandex_vpc_subnet.subnet-public.id
     security_group_ids = [yandex_vpc_security_group.web-sg.id]
     nat                = true
   }

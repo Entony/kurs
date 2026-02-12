@@ -27,11 +27,10 @@ resource "yandex_vpc_subnet" "subnet-public" {
 
 resource "yandex_vpc_gateway" "nat-gateway" {
   name = "nat-gateway"
-  type = "nat"
-  nat_gateway {
-    subnet_id = yandex_vpc_subnet.subnet-public.id # публичная подсеть для шлюза
-  }
+
+  shared_egress_gateway {}
 }
+
 
 resource "yandex_vpc_route_table" "private-route" {
   name       = "private-route"

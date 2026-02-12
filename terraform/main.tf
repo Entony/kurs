@@ -1,18 +1,3 @@
-# Объявление переменных для конфиденциальных параметров
-
-variable "folder_id" {
-  type = string
-}
-
-variable "vm_user" {
-  type = string
-}
-
-variable "ssh_key" {
-  type      = string
-  sensitive = true
-}
-
 # Настройка провайдера
 
 resource "yandex_resourcemanager_folder_iam_member" "ig-editor" {
@@ -32,7 +17,7 @@ terraform {
   required_providers {
     yandex = {
       source  = "yandex-cloud/yandex"
-      version = ">= 0.47.0"
+      version = ">= 0.95.0"
     }
   }
 }

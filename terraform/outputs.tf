@@ -12,10 +12,10 @@ output "zabbix_public_ip" {
   value       = yandex_compute_instance.zabbix.network_interface[0].nat_ip_address
 }
 
-output "load_balancer_public_ip" {
-  description = "Внешний IP-адрес сетевого балансировщика для веб-трафика"
-  value       = yandex_lb_network_load_balancer.balancer.listener[0].external_address_spec[0].address
-}
+# output "load_balancer_public_ip" {
+#  description = "Внешний IP-адрес сетевого балансировщика для веб-трафика"
+#  value       = element([for l in yandex_lb_network_load_balancer.balancer.listener : l.external_address_spec[0].address], 0)
+#}
 
 # ============================================================================
 # 🌐 Внутренние IP-адреса (для диагностики и внутренних соединений)
@@ -61,10 +61,10 @@ output "ssh_to_web_via_bastion" {
   EOT
 }
 
-output "web_access_url" {
-  description = "URL для доступа к веб-приложению через балансировщик"
-  value       = "http://${yandex_lb_network_load_balancer.balancer.listener[0].external_address_spec[0].address}"
-}
+#output "web_access_url" {
+#description = "URL для доступа к веб-приложению через балансировщик"
+#value       = "http://${element([for l in yandex_lb_network_load_balancer.balancer.listener : l.address], 0)}"
+#}
 
 output "zabbix_web_url" {
   description = "URL веб-интерфейса Zabbix"
