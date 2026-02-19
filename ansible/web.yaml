@@ -1,0 +1,23 @@
+- hosts: web
+  become: yes
+  tasks:
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+    - name: Nginx is started?
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+  roles:
+    - role: nephelaiio.filebeat
+      vars:
+        filebeat_config:
+          filebeat.inputs:
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/*.log
+          output.elasticsearch:
+            hosts: ["http://localhost:9200"]

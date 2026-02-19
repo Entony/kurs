@@ -107,41 +107,5 @@ resource "yandex_compute_instance" "zabbix-frontend" {
   }
 }
 
-// 4. SECURITY GROUPS
-resource "yandex_vpc_security_group" "zabbix-server-sg" {
-  name       = "zabbix-server-sg"
-  network_id = yandex_vpc_network.main-network.id
 
-  ingress {
-    protocol       = "TCP"
-    port           = 10051 // порт для связи с Frontend
-    v4_cidr_blocks = [yandex_compute_instance.zabbix-frontend.network_interface[0].ip_address + "/32"]
-  }
 
-  egress {
-    protocol       = "ANY"
-    v4_cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "yandex_vpc_security_group" "zabbix-frontend-sg" {
-  name       = "zabbix-frontend-sg"
-  network_id = yandex_vpc_network.main-network.id
-
-  ingress {
-    protocol       = "TCP"
-    port           = 80
-    v4_cidr_blocks = ["0.0.0.0/0"] // открыт для всех
-  }
-
-  ingress {
-    protocol       = "TCP"
-    port           = 443
-    v4_cidr_blocks = ["0.0.0.0/0"] // если нужен HTTPS
-  }
-
-  egress {
-    protocol       = "ANY"
-    v4_cidr_blocks = ["0.0.0.0/0"]
-  }
-}

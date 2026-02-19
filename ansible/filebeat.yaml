@@ -1,0 +1,12 @@
+ - hosts: web kibana zabbix elastic
+   roles:
+    - role: nephelaiio.filebeat
+      vars:
+        filebeat_config:
+          filebeat.inputs:
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/*.log
+          output.elasticsearch:
+            hosts: ["http://localhost:9200"]
