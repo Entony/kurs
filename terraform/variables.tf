@@ -8,7 +8,3 @@ variable "db_password" {
   description = "Пароль для пользователя Zabbix в PostgreSQL"
 }
 
-variable "git_repo_url" {
-  type    = string
-  default = "https://github.com/entony/website.git"
-}
