@@ -1,0 +1,20 @@
+---
+# Версия Zabbix (должна совпадать с версией в репозитории)
+zabbix_version: "6.0"
+
+# Настройки БД
+db_name: "zabbix"
+db_user: "zabbix"
+db_password: "zabbix"  
+db_root_password: "zabbix" # Пароль root MySQL
+
+# Настройки Zabbix Frontend
+zabbix_server_name: "My Zabbix Server"
+zabbix_timezone: "Europe/Moscow"
+
+# Сеть
+firewall_allowed_tcp_ports:
+  - 80
+  - 443
+  - 10051
+

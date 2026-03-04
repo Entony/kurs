@@ -1,12 +1,132 @@
- - hosts: web kibana zabbix elastic
-   roles:
-    - role: nephelaiio.filebeat
-      vars:
-        filebeat_config:
+---
+- name: Install and Configure Filebeat 8.11.0 in Docker
+  hosts: web
+  become: yes
+  vars:
+    es_host: "10.0.1.18"
+    es_port: "9200"
+    filebeat_version: "8.11.0"
+    # Если на Elasticsearch включена защита (по умолчанию в 8.x):
+    # es_username: "elastic"
+    # es_password: "your_password"
+    # es_ssl: true
+
+  tasks:
+    - name: Install prerequisites for Docker
+      apt:
+        name:
+          - curl
+          - ca-certificates
+          - gnupg
+          - python3-pip
+          - python3-docker
+        state: present
+        update_cache: yes
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        filename: docker
+
+    - name: Install Docker CE
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+
+    - name: Enable and Start Docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Wait for Docker socket to be ready
+      wait_for:
+        path: /var/run/docker.sock
+        timeout: 30
+
+    - name: Create Filebeat configuration directory
+      file:
+        path: /etc/filebeat
+        state: directory
+        mode: '0755'
+
+    - name: Configure Filebeat
+      copy:
+        dest: /etc/filebeat/filebeat.yml
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
           filebeat.inputs:
             - type: log
               enabled: true
               paths:
-                - /var/log/*.log
+                - /var/log/nginx/access.log
+              fields:
+                log_type: nginx_access
+
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/nginx/error.log
+              fields:
+                log_type: nginx_error
+
+          processors:
+            - add_host_metadata: ~
+
           output.elasticsearch:
-            hosts: ["http://localhost:9200"]
+            hosts: ["{{ es_host }}:{{ es_port }}"]
+            {% if es_ssl is defined and es_ssl %}
+            protocol: "https"
+            ssl.certificate_authorities: ["/usr/share/filebeat/certs/ca.crt"]
+            {% endif %}
+            {% if es_username is defined %}
+            username: "{{ es_username }}"
+            password: "{{ es_password }}"
+            {% endif %}
+
+          logging.level: info
+          logging.to_files: true
+          logging.files:
+            path: /var/log/filebeat
+            name: filebeat
+            keepfiles: 7
+            permissions: 0640
+
+    - name: Stop and remove existing Filebeat container
+      shell: docker rm -f filebeat || true
+      ignore_errors: yes
+
+    - name: Pull Filebeat image 8.11.0
+      docker_image:
+        name: "docker.elastic.co/beats/filebeat:{{ filebeat_version }}"
+        source: pull
+
+    - name: Run Filebeat container version 8.11.0
+      docker_container:
+        name: filebeat
+        image: "docker.elastic.co/beats/filebeat:{{ filebeat_version }}"
+        user: root
+        state: started
+        restart_policy: always
+        volumes:
+          - /etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+          - /var/log/nginx:/var/log/nginx:ro
+          - /var/lib/docker/containers:/var/lib/docker/containers:ro
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+        privileged: true
+        network_mode: host
+
+    - name: Setup Filebeat template (inside container)
+      shell: docker exec filebeat filebeat setup -e
+      register: setup_result
+      changed_when: setup_result.rc == 0
+      failed_when: false

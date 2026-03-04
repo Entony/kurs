@@ -1,7 +1,79 @@
-- hosts: kibana
-  roles:
-    - role: geerlingguy.kibana
-      vars:
-        kibana_version: "8.x"
-        kibana_server_host: "0.0.0.0"
-        kibana_elasticsearch_url: "http://localhost:9200"
+---
+- name: Install Kibana on Kibana VM
+  hosts: kibana
+  become: yes
+  gather_facts: yes
+
+  vars:
+    kibana_version: "8.11.0"
+    elastic_host: "10.0.1.18"  
+    elastic_port: 9200
+    kibana_port: 5601
+    docker_network: "elastic-net"
+
+  tasks:
+    # ============================================================
+    # 1. Установка Docker
+    # ============================================================
+    - name: Install Docker
+      shell: |
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    # ============================================================
+    # 2. Создание Docker сети
+    # ============================================================
+    - name: Create Docker network
+      docker_network:
+        name: "{{ docker_network }}"
+        state: present
+
+    # ============================================================
+    # 3. Запуск Kibana контейнера
+    # ============================================================
+    - name: Run Kibana container
+      docker_container:
+        name: kibana
+        image: "docker.elastic.co/kibana/kibana:{{ kibana_version }}"
+        networks:
+          - name: "{{ docker_network }}"
+        ports:
+          - "{{ kibana_port }}:{{ kibana_port }}"
+        env:
+          ELASTICSEARCH_HOSTS: "http://{{ elastic_host }}:{{ elastic_port }}"
+          SERVER_NAME: "kibana"
+          SERVER_HOST: "0.0.0.0"
+        restart_policy: always
+        state: started
+        recreate: false
+
+    # ============================================================
+    # 4. Проверка готовности Kibana
+    # ============================================================
+    - name: Wait for Kibana to be ready
+      wait_for:
+        port: "{{ kibana_port }}"
+        delay: 10
+        timeout: 120
+
+    - name: Check Kibana status
+      uri:
+        url: "http://localhost:{{ kibana_port }}/api/status"
+        return_content: yes
+        status_code: [200, 302]
+      register: kibana_status
+      retries: 5
+      delay: 10
+      until: kibana_status.status in [200, 302]
+
+    - name: Show Kibana info
+      debug:
+        msg: "Kibana is running on http://{{ ansible_host }}:{{ kibana_port }}"

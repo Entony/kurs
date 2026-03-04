@@ -1,0 +1,59 @@
+all:
+  vars:
+    # Общие настройки для всех хостов
+    ansible_user: user
+    ansible_ssh_private_key_file: ~/.ssh/ssh-key-1770641479505
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -W %h:%p -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i $HOME/.ssh/ssh-key-1770641479505 user@158.160.33.147"'
+
+    elastic_host: "10.0.1.18"  # Приватный IP Elasticsearch
+    elastic_port: 9200
+    filebeat_version: "8.11.0"
+
+    zabbix_server_ip: "{{ hostvars['zabbix-01']['ansible_host'] }}"
+    zabbix_version: "6.0"
+
+  children:
+    web:
+      vars:
+        zabbix_agent_template: "Template OS Linux by Zabbix agent"
+        filebeat_log_paths:
+         - /var/log/nginx/*.log
+         - /var/log/syslog
+        server_type: "web"
+      hosts:
+        web1:
+          ansible_host: 10.0.1.17
+        web2:
+          ansible_host: 10.0.2.4
+    
+    elastic:
+      vars:
+        zabbix_agent_template: "Template OS Linux by Zabbix agent"
+        server_type: "elastic"
+      hosts:
+        elastic:
+          ansible_host: 10.0.1.18  
+
+    kibana:
+      vars:
+        zabbix_agent_template: "Template OS Linux by Zabbix agent"
+        server_type: "kibana"
+      hosts:
+        kibana:
+          ansible_host: 10.0.0.8  
+    
+    zabbix:
+      vars:
+        server_type: "zabbix"
+      hosts:
+        zabbix:
+          ansible_host: 10.0.0.27 
+    
+    bastion:
+      vars:
+        zabbix_agent_template: "Template OS Linux by Zabbix agent"
+        server_type: "bastion"
+      hosts:
+        bastion:
+          ansible_host: 158.160.33.147
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'

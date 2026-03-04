@@ -1,117 +1,110 @@
-resource "yandex_compute_instance_group" "web-instance-group" {
-  name               = "web-ig"
-  folder_id          = var.folder_id
-  service_account_id = var.service_account_id
-  instance_template {
-
-    platform_id = "standard-v3"
-    resources {
-      memory = 2
-      cores  = 2
-    }
-
-    boot_disk {
-      mode = "READ_WRITE"
-      initialize_params {
-        image_id = data.yandex_compute_image.main_image.id
-        type     = "network-hdd"
-        size     = 20
-      }
-    }
-
-    network_interface {
-      network_id         = yandex_vpc_network.main-network.id
-      security_group_ids = [yandex_vpc_security_group.web-sg.id]
-      subnet_ids = [
-        yandex_vpc_subnet.subnet-a.id,
-        yandex_vpc_subnet.subnet-b.id
-      ]
-
-      nat = true
-    }
-
-    metadata = {
-      user-data = templatefile("config.tpl", {
-        VM_USER = var.vm_user
-        SSH_KEY = var.ssh_key
-      })
-
-    }
-
-  }
-
-  scale_policy {
-    auto_scale {
-      initial_size           = 2
-      measurement_duration   = 60
-      cpu_utilization_target = 40
-      min_zone_size          = 1
-      max_size               = 3
-      warmup_duration        = 120
-    }
-  }
-
-  allocation_policy {
-    zones = [
-      "ru-central1-a",
-      "ru-central1-b"
-    ]
-  }
-
-  deploy_policy {
-    max_unavailable = 1
-    max_expansion   = 0
-  }
-
-  load_balancer {
-    target_group_name        = yandex_alb_target_group.web-tg.name
-    target_group_description = "Target group for ALB"
-  }
+resource "yandex_compute_disk" "web-disk1" {
+  name     = "web-disk1"
+  type     = "network-hdd"
+  zone     = "ru-central1-a"
+  size     = 20
+  image_id = data.yandex_compute_image.main_image.id
 }
 
-
-# Создание сетевого балансировщика
-
-resource "yandex_lb_network_load_balancer" "balancer" {
-  name = "group-balancer"
-
-  listener {
-    name        = "http"
-    port        = 80
-    target_port = 80
-  }
-
-  attached_target_group {
-    target_group_id = yandex_compute_instance_group.web-instance-group.load_balancer[0].target_group_id
-    healthcheck {
-      name = "tcp"
-      tcp_options {
-        port = 80
-      }
-    }
-  }
+resource "yandex_compute_disk" "web-disk2" {
+  name     = "web-disk2"
+  type     = "network-hdd"
+  zone     = "ru-central1-b"
+  size     = 20
+  image_id = data.yandex_compute_image.main_image.id
 }
 
-// 1. Target Group (ALB, а не NLB!)
+resource "yandex_compute_instance" "web1" {
+  name = "web1"
+  zone = "ru-central1-a"
+
+  resources {
+    cores  = 2
+    memory = 2
+  }
+
+  boot_disk {
+    disk_id = yandex_compute_disk.web-disk1.id
+  }
+
+  network_interface {
+    subnet_id          = yandex_vpc_subnet.subnet-a.id
+    security_group_ids = [yandex_vpc_security_group.web-sg.id]
+    nat                = false
+  }
+
+  metadata = {
+    user-data = templatefile("config.tpl", {
+      VM_USER = var.vm_user
+      SSH_KEY = var.ssh_key
+    })
+  }
+
+
+}
+
+resource "yandex_compute_instance" "web2" {
+  name = "web2"
+  zone = "ru-central1-b"
+
+  resources {
+    cores  = 2
+    memory = 2
+  }
+
+  boot_disk {
+    disk_id = yandex_compute_disk.web-disk2.id
+  }
+
+  network_interface {
+    subnet_id          = yandex_vpc_subnet.subnet-b.id
+    security_group_ids = [yandex_vpc_security_group.web-sg.id]
+    nat                = false
+  }
+
+  metadata = {
+    user-data = templatefile("config.tpl", {
+      VM_USER = var.vm_user
+      SSH_KEY = var.ssh_key
+    })
+  }
+
+
+}
+
+# Target Group
 resource "yandex_alb_target_group" "web-tg" {
-  name = "web-target-group"
-  // ВМ добавятся автоматически из Instance Group
+  name      = "web-target-group"
+  folder_id = var.folder_id
+
+  target {
+    subnet_id  = yandex_vpc_subnet.subnet-a.id
+    ip_address = yandex_compute_instance.web1.network_interface.0.ip_address
+  }
+
+  target {
+    subnet_id  = yandex_vpc_subnet.subnet-b.id
+    ip_address = yandex_compute_instance.web2.network_interface.0.ip_address
+  }
 }
 
-// 2. Backend Group (с HTTP-healthcheck)
+
+# Backend Group
 resource "yandex_alb_backend_group" "web-bg" {
   name = "web-backend-group"
 
   http_backend {
     name             = "web-backend"
-    port             = 80
     target_group_ids = [yandex_alb_target_group.web-tg.id]
+    port             = 80
+
+    load_balancing_config {
+      mode = "ROUND_ROBIN"
+    }
 
     healthcheck {
       http_healthcheck {
-        port          = 80
-        path          = "/" // healthcheck на корень
-        http_versions = ["HTTP1"]
+        path = "/"
       }
       timeout             = "10s"
       interval            = "30s"
@@ -121,50 +114,69 @@ resource "yandex_alb_backend_group" "web-bg" {
   }
 }
 
-// 3. HTTP Router (маршрутизация по пути /)
+# HTTP Router
 resource "yandex_alb_http_router" "web-router" {
-  name = "web-http-router"
+  name      = "web-http-router"
+  folder_id = var.folder_id
+}
 
-  virtual_host {
-    name = "default-host"
+# Virtual Host 
+resource "yandex_alb_virtual_host" "web-vhost" {
+  name           = "web-virtual-host"
+  http_router_id = yandex_alb_http_router.web-router.id
 
-    route {
-      name = "http-route"
-      http_route {
-        http_match {
-          path { exact = "/" } // путь /
-        }
-        http_action {
-          backend_group_id = yandex_alb_backend_group.web-bg.id
+  route {
+    name = "http-route"
+
+    http_route {
+      http_match {
+        path {
+          prefix = "/"
         }
       }
-    }
 
-    healthcheck { path = "/" }
+      http_route_action {
+        backend_group_id = yandex_alb_backend_group.web-bg.id
+      }
+    }
   }
 }
 
-// 4. Application Load Balancer
+# Application Load Balancer
 resource "yandex_alb_load_balancer" "web-alb" {
-  name = "web-application-lb"
+  name       = "web-application-lb"
+  folder_id  = var.folder_id
+  network_id = yandex_vpc_network.main-network.id
+
+  allocation_policy {
+    location {
+      zone_id   = "ru-central1-a"
+      subnet_id = yandex_vpc_subnet.subnet-a.id
+    }
+    location {
+      zone_id   = "ru-central1-b"
+      subnet_id = yandex_vpc_subnet.subnet-b.id
+    }
+  }
 
   listener {
     name = "http-listener"
-    port = 80
-
     endpoint {
       address {
-        external_ipv4_address { address = "auto" }
+        external_ipv4_address {}
+      }
+      ports = [80]
+    }
+    http {
+      handler {
+        http_router_id = yandex_alb_http_router.web-router.id
       }
     }
   }
 
-  http_router {
-    http_router_id = yandex_alb_http_router.web-router.id
-  }
-
-  network_id         = yandex_vpc_network.main-network.id
-  security_group_ids = [yandex_vpc_security_group.web-sg.id]
 }
 
-
+output "alb_public_ip" {
+  description = "Публичный IP Application Load Balancer"
+  value       = yandex_alb_load_balancer.web-alb.listener[0].endpoint[0].address[0].external_ipv4_address[0].address
+}

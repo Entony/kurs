@@ -1,0 +1,156 @@
+---
+- name: Deploy Zabbix Agent 6.0
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    zabbix_version: "6.0"
+    zabbix_agent_template: "Template OS Linux by Zabbix agent"
+    # Если переменная не задана в инвентаре, используем дефолт
+    zabbix_server_ip: "{{ hostvars['zabbix']['ansible_host'] | default('127.0.0.1') }}"
+
+  tasks:
+    
+    # Подготовка: Ждем освобождения apt lock (борьба с unattended-upgrades)
+    
+    - name: Kill stuck unattended-upgrades process
+      shell: |
+        if pgrep -f unattended-upgr > /dev/null; then
+          echo "Killing unattended-upgrades..."
+          kill -9 $(pgrep -f unattended-upgr) || true
+          sleep 3
+        fi
+        # Дополнительная очистка lock-файлов если процесс завис
+        if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+          fuser -k /var/lib/dpkg/lock-frontend || true
+        fi
+      become: yes
+      when: ansible_os_family == "Debian"
+      ignore_errors: yes
+
+    # Подготовка системы и репозиторий
+   
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      retries: 3
+      delay: 10
+      until: result is succeeded
+      register: result
+
+    - name: Install Zabbix repository
+      apt:
+        deb: "https://repo.zabbix.com/zabbix/6.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_6.0+ubuntu24.04_all.deb"
+        state: present
+      when: ansible_os_family == "Debian"
+    
+    - name: Update cache after adding repo
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    
+    # Установка агента
+    
+    - name: Install Zabbix Agent 2
+      apt:
+        name:
+          - zabbix-agent2
+          - zabbix-agent2-plugin-*
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    
+    # Настройка основного конфига (Server, Hostname, Include)
+    
+    - name: Configure Zabbix Agent 2 main settings
+      lineinfile:
+        path: /etc/zabbix/zabbix_agent2.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+        backup: yes
+      loop:
+        # Добавляем 127.0.0.1, чтобы сервер мог опрашивать себя локально
+        - { regexp: '^Server=', line: 'Server={{ zabbix_server_ip }},127.0.0.1' }
+        - { regexp: '^ServerActive=', line: 'ServerActive={{ zabbix_server_ip }}' }
+        - { regexp: '^Hostname=', line: 'Hostname={{ inventory_hostname }}' }
+        # Убедимся, что Include раскомментирован и настроен
+        - { regexp: '^#?Include=', line: 'Include=/etc/zabbix/zabbix_agent2.d/*.conf' }
+      notify: restart zabbix-agent2
+
+    
+    # Настройка UserParameters 
+    
+    # Для WEB-серверов
+    - name: Configure Web Server UserParameters
+      copy:
+        content: |
+          # Zabbix UserParameters for Web Servers
+          UserParameter=nginx.status[*],curl -s http://localhost/nginx_status
+        dest: /etc/zabbix/zabbix_agent2.d/web.conf
+        owner: root
+        group: root
+        mode: '0644'
+      when: server_type is defined and server_type == "web"
+      notify: restart zabbix-agent2
+
+    # Для Elastic-серверов
+    - name: Configure Elastic Server UserParameters
+      copy:
+        content: |
+          # Zabbix UserParameters for Elastic Servers
+          UserParameter=elastic.health,curl -s http://localhost:9200/_cluster/health
+        dest: /etc/zabbix/zabbix_agent2.d/elastic.conf
+        owner: root
+        group: root
+        mode: '0644'
+      when: server_type is defined and server_type == "elastic"
+      notify: restart zabbix-agent2
+
+    # УДАЛЕНИЕ лишних конфигов, если тип сервера изменился 
+    - name: Remove Web config if not web server
+      file:
+        path: /etc/zabbix/zabbix_agent2.d/web.conf
+        state: absent
+      when: server_type is defined and server_type != "web"
+      notify: restart zabbix-agent2
+
+    - name: Remove Elastic config if not elastic server
+      file:
+        path: /etc/zabbix/zabbix_agent2.d/elastic.conf
+        state: absent
+      when: server_type is defined and server_type != "elastic"
+      notify: restart zabbix-agent2
+
+    
+    # Фаервол (UFW)
+    
+    - name: Allow Zabbix Agent port in UFW
+      ufw:
+        rule: allow
+        port: "10050"
+        proto: tcp
+        comment: "Zabbix Agent Passive Checks"
+      when: ansible_os_family == "Debian"
+
+    
+    # Запуск сервиса
+   
+    - name: Start and enable Zabbix Agent 2
+      systemd:
+        name: zabbix-agent2
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+  handlers:
+    - name: restart zabbix-agent2
+      systemd:
+        name: zabbix-agent2
+        state: restarted
+        daemon_reload: yes

@@ -1,23 +1,85 @@
-- hosts: web
-  become: yes
+---
+- name: Deploy Website from GitHub to Web Servers
+  hosts: web
+  become: true
+  gather_facts: true
+  vars:
+    repo_url: "https://github.com/entony/website.git"
+    site_dir: "/var/www/static-site"
+    nginx_conf: "/etc/nginx/sites-available/static-site"
+    
+    
+
   tasks:
-    - name: Install nginx
+    - name: Ensure nginx and git are installed
       apt:
-        name: nginx
+        name:
+          - nginx
+          - git
         state: present
-    - name: Nginx is started?
-      service:
+    
+
+  # 2. Клонируйте репозиторий
+    - name: Make Git trust the site directory
+      command: git config --global --add safe.directory {{ site_dir }}
+      become: yes
+      changed_when: false
+
+    - name: Remove existing site directory (if any)
+      file:
+        path: "{{ site_dir }}"
+        state: absent
+
+    - name: Clone GitHub repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ site_dir }}"
+        version: master  # или master, в зависимости от ветки
+        force: yes
+      notify:
+        - reload nginx
+
+    # 3. Настройте права
+    - name: Set permissions for site directory
+      file:
+        path: "{{ site_dir }}"
+        owner: www-data
+        group: www-data
+        mode: '0755'
+        recurse: yes
+
+    # 4. Создайте конфигурацию NGINX
+    - name: Configure NGINX for static site
+      copy:
+        content: |
+          server {
+              listen 80;
+              server_name _;
+
+              root {{ site_dir }};
+              index index.html;
+
+              location / {
+                  try_files $uri $uri/ =404;
+              }
+          }
+        dest: "{{ nginx_conf }}"
+      notify:
+        - reload nginx
+
+    # 5. Активируйте конфигурацию
+    - name: Enable NGINX site
+      file:
+        src: "{{ nginx_conf }}"
+        dest: "/etc/nginx/sites-enabled/static-site"
+        state: link
+      notify:
+        - reload nginx
+
+  handlers:
+    - name: reload nginx
+      systemd:
         name: nginx
-        state: started
-        enabled: yes
-  roles:
-    - role: nephelaiio.filebeat
-      vars:
-        filebeat_config:
-          filebeat.inputs:
-            - type: log
-              enabled: true
-              paths:
-                - /var/log/*.log
-          output.elasticsearch:
-            hosts: ["http://localhost:9200"]
+        state: reloaded
+      
+

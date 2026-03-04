@@ -1,0 +1,221 @@
+---
+- name: Deploy Zabbix Server with MySQL
+  hosts: zabbix
+  become: yes
+  vars_files:
+    - zabbix_conf.yml
+
+  tasks:
+    # Подготовка системы и установка зависимостей
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages
+      apt:
+        name:
+          - software-properties-common
+          - python3-pymysql
+          - mariadb-server
+          - mariadb-client
+          - apache2
+          - libapache2-mod-php
+          - php-mysql
+          - php-gd
+          - php-xml
+          - php-bcmath
+          - php-mbstring
+          - curl
+        state: present
+      when: ansible_os_family == "Debian"
+
+    # Добавление репозитория Zabbix
+    - name: Install Zabbix repository package
+      apt:
+        deb: "https://repo.zabbix.com/zabbix/6.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_6.0+ubuntu24.04_all.deb"
+        state: present
+      when: ansible_os_family == "Debian"
+      
+
+    - name: Update cache after adding repo
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+       #  Настройка MySQL
+    - name: Start and enable MariaDB
+      systemd:
+        name: mariadb
+        state: started
+        enabled: yes
+
+    # Подключение без пароля (по умолчанию unix_socket)
+    - name: Set MySQL root password (Initial connection without password)
+      mysql_user:
+        name: root
+        password: "{{ db_root_password }}"
+        host_all: yes
+        login_unix_socket: /run/mysqld/mysqld.sock
+        state: present
+      ignore_errors: yes
+      register: mysql_root_pw_result
+
+    # Если первое подключение не удалось, пробуем с паролем 
+    - name: Set MySQL root password (Retry with password if already set)
+      mysql_user:
+        name: root
+        password: "{{ db_root_password }}"
+        host_all: yes
+        login_unix_socket: /run/mysqld/mysqld.sock
+        login_user: root
+        login_password: "{{ db_root_password }}"
+        state: present
+      when: mysql_root_pw_result.failed is defined and mysql_root_pw_result.failed
+
+    # Создание конфига для удобства 
+    - name: Create .my.cnf for root user
+      copy:
+        dest: /root/.my.cnf
+        content: |
+          [client]
+          user=root
+          password={{ db_root_password }}
+        mode: '0600'
+      no_log: true
+
+    - name: Create Zabbix database
+      mysql_db:
+        name: "{{ db_name }}"
+        encoding: utf8mb4
+        collation: utf8mb4_bin
+        login_user: root
+        login_password: "{{ db_root_password }}"
+        login_unix_socket: /run/mysqld/mysqld.sock
+        state: present
+
+    - name: Create Zabbix DB user
+      mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: "{{ db_name }}.*:ALL"
+        host: localhost
+        login_user: root
+        login_password: "{{ db_root_password }}"
+        login_unix_socket: /run/mysqld/mysqld.sock
+        state: present
+
+    # Установка Zabbix Server и Frontend
+    - name: Install Zabbix Server, Web and Apache config
+      apt:
+        name:
+          - zabbix-server-mysql
+          - zabbix-frontend-php
+          - zabbix-apache-conf
+          - zabbix-sql-scripts
+        state: present
+      when: ansible_os_family == "Debian"
+
+        # Импорт схемы и данных в БД
+    - name: Check if Zabbix DB is already initialized
+      mysql_query:
+        query: "SELECT 1 FROM users LIMIT 1"
+        login_db: "{{ db_name }}"
+        login_user: "{{ db_user }}"
+        login_password: "{{ db_password }}"
+        login_unix_socket: /run/mysqld/mysqld.sock
+      register: zabbix_db_check
+      ignore_errors: yes
+      changed_when: false
+      no_log: true
+
+    - name: Import Zabbix schema and data
+      shell: |
+        zcat /usr/share/zabbix-sql-scripts/mysql/server.sql.gz | mysql -u {{ db_user }} -p{{ db_password }} {{ db_name }}
+      args:
+        creates: /etc/zabbix/zabbix_db_imported_marker
+      when: zabbix_db_check.failed is defined and zabbix_db_check.failed
+      notify: restart zabbix-server
+
+    - name: Create DB import marker
+      file:
+        path: /etc/zabbix/zabbix_db_imported_marker
+        state: touch
+        mode: '0644'
+      when: zabbix_db_check.failed is defined and zabbix_db_check.failed
+
+    # Конфигурация Zabbix Server
+    - name: Configure Zabbix Server DB credentials
+      lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: "^#?DBPassword="
+        line: "DBPassword={{ db_password }}"
+        state: present
+      notify: restart zabbix-server
+
+    - name: Configure Zabbix Server DB User
+      lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: "^#?DBUser="
+        line: "DBUser={{ db_user }}"
+        state: present
+      notify: restart zabbix-server
+
+    # Конфигурация PHP и Apache
+    - name: Configure Zabbix Web DB credentials
+      lineinfile:
+        path: /etc/zabbix/apache.conf
+        regexp: "^#?php_value date.timezone"
+        line: "php_value date.timezone {{ zabbix_timezone }}"
+        state: present
+      notify: restart apache2
+
+    
+    - name: Ensure Zabbix Web Config exists
+      template:
+        src: zabbix.conf.php.j2
+        dest: /etc/zabbix/web/zabbix.conf.php
+        owner: www-data
+        group: www-data
+        mode: '0640'
+      notify: restart apache2
+
+    # Запуск сервисов
+    - name: Start and enable Zabbix Server
+      systemd:
+        name: zabbix-server
+        state: started
+        enabled: yes
+
+    - name: Start and enable Apache
+      systemd:
+        name: apache2
+        state: started
+        enabled: yes
+
+    # Фаервол (UFW для Ubuntu)
+    - name: Install UFW
+      apt:
+        name: ufw
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Allow TCP ports in UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop: "{{ firewall_allowed_tcp_ports }}"
+      when: ansible_os_family == "Debian"
+
+  handlers:
+    - name: restart zabbix-server
+      systemd:
+        name: zabbix-server
+        state: restarted
+
+    - name: restart apache2
+      systemd:
+        name: apache2
+        state: restarted

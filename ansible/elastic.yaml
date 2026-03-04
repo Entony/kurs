@@ -1,6 +1,61 @@
-- hosts: elastic
+---
+- name: Install Elasticsearch
+  hosts: elastic
   become: yes
+  gather_facts: yes
+
   vars:
-    es_version: "8.x" # Укажите нужную версию
-  roles:
-    - geerlingguy.elasticsearch
+    elastic_version: "8.11.0"
+    elastic_memory: "1g"
+
+  tasks:
+    - name: Install Docker
+      shell: |
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Create Docker network
+      docker_network:
+        name: elastic-net
+
+    - name: Run Elasticsearch container
+      docker_container:
+        name: elasticsearch
+        image: "docker.elastic.co/elasticsearch/elasticsearch:{{ elastic_version }}"
+        networks:
+          - name: elastic-net
+        ports:
+          - "9200:9200"
+          - "9300:9300"
+        env:
+          discovery.type: "single-node"
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: "-Xms{{ elastic_memory }} -Xmx{{ elastic_memory }}"
+        volumes:
+          - "elastic-data:/usr/share/elasticsearch/data"
+        restart_policy: always
+        state: started
+
+    - name: Wait for Elasticsearch to be ready
+      wait_for:
+        port: 9200
+        delay: 10
+        timeout: 120
+
+    - name: Check Elasticsearch status
+      uri:
+        url: http://localhost:9200
+        return_content: yes
+      register: elastic_status
+
+    - name: Show Elasticsearch version
+      debug:
+        var: elastic_status.json.version.number
